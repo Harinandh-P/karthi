@@ -1,0 +1,131 @@
+// Blind Stick using Arduino UNO + HC-SR04
+// Buzzer + Vibration Motor + ON/OFF Switch
+
+#define TRIG_PIN 9
+#define ECHO_PIN 10
+
+#define BUZZER_PIN 8
+#define MOTOR_PIN 6
+#define SWITCH_PIN 7
+
+long duration;
+float distance;
+
+void setup() {
+  pinMode(TRIG_PIN, OUTPUT);
+  pinMode(ECHO_PIN, INPUT);
+
+  pinMode(BUZZER_PIN, OUTPUT);
+  pinMode(MOTOR_PIN, OUTPUT);
+
+  pinMode(SWITCH_PIN, INPUT_PULLUP);
+
+  digitalWrite(BUZZER_PIN, LOW);
+  digitalWrite(MOTOR_PIN, LOW);
+
+  Serial.begin(9600);
+}
+
+float getDistance() {
+
+  // Send ultrasonic pulse
+  digitalWrite(TRIG_PIN, LOW);
+  delayMicroseconds(2);
+
+  digitalWrite(TRIG_PIN, HIGH);
+  delayMicroseconds(10);
+
+  digitalWrite(TRIG_PIN, LOW);
+
+  // Read echo
+  duration = pulseIn(ECHO_PIN, HIGH, 30000);
+
+  // If no echo
+  if (duration == 0) {
+    return 999;
+  }
+
+  // Calculate distance in cm
+  distance = duration * 0.0343 / 2;
+
+  return distance;
+}
+
+void loop() {
+
+  // Switch OFF
+  if (digitalRead(SWITCH_PIN) == HIGH) {
+
+    digitalWrite(BUZZER_PIN, LOW);
+    digitalWrite(MOTOR_PIN, LOW);
+
+    delay(100);
+    return;
+  }
+
+  // Switch ON
+  float d = getDistance();
+
+  Serial.print("Distance: ");
+  Serial.print(d);
+  Serial.println(" cm");
+
+  // --------------------------------
+  // No nearby obstacle
+  // --------------------------------
+  if (d > 100) {
+
+    digitalWrite(BUZZER_PIN, LOW);
+    digitalWrite(MOTOR_PIN, LOW);
+
+    delay(100);
+  }
+
+  // --------------------------------
+  // 61 - 100 cm
+  // --------------------------------
+  else if (d > 60) {
+
+    digitalWrite(MOTOR_PIN, HIGH);
+    tone(BUZZER_PIN, 2000);
+
+    delay(150);
+
+    digitalWrite(MOTOR_PIN, LOW);
+    noTone(BUZZER_PIN);
+
+    delay(600);
+  }
+
+  // --------------------------------
+  // 31 - 60 cm
+  // --------------------------------
+  else if (d > 30) {
+
+    digitalWrite(MOTOR_PIN, HIGH);
+    tone(BUZZER_PIN, 2500);
+
+    delay(200);
+
+    digitalWrite(MOTOR_PIN, LOW);
+    noTone(BUZZER_PIN);
+
+    delay(250);
+  }
+
+  // --------------------------------
+  // 0 - 30 cm
+  // --------------------------------
+  else {
+
+    digitalWrite(MOTOR_PIN, HIGH);
+    tone(BUZZER_PIN, 3000);
+
+    delay(150);
+
+    digitalWrite(MOTOR_PIN, LOW);
+    noTone(BUZZER_PIN);
+
+    delay(80);
+  }
+}

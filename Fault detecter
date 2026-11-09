@@ -23,8 +23,8 @@ DHT dht(DHT_PIN, DHT_TYPE);
 const float ACS_SENSITIVITY = 0.185;
 
 // Initial current thresholds
-float WARNING_CURRENT = 0.50;
-float DANGER_CURRENT  = 1.00;
+float WARNING_CURRENT = 3.0;
+float DANGER_CURRENT  = 4.00;
 
 // Change this if your SW-420 module
 // gives HIGH during vibration.

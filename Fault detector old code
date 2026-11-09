@@ -1,0 +1,328 @@
+#include <DHT.h>
+
+// ---------------- PIN CONFIGURATION ----------------
+
+#define DHT_PIN       3
+#define DHT_TYPE      DHT22
+
+#define VIBRATION_PIN 2
+#define ACS_PIN       A0
+
+#define GREEN_LED     8
+#define ORANGE_LED    9
+#define RED_LED       10
+
+#define BUZZER_PIN    11
+
+// ---------------- SENSOR SETTINGS ----------------
+
+DHT dht(DHT_PIN, DHT_TYPE);
+
+// ACS712 5A sensitivity
+const float ACS_SENSITIVITY = 0.185;
+
+// Initial current thresholds
+float WARNING_CURRENT = 3.0;
+float DANGER_CURRENT  = 4.00;
+
+// Change this if your SW-420 module
+// gives HIGH during vibration.
+const bool VIBRATION_ACTIVE_LOW = true;
+
+// Current display change sensitivity
+const float CURRENT_CHANGE_LIMIT = 0.05;
+
+// Temperature display change sensitivity
+const float TEMP_CHANGE_LIMIT = 0.2;
+
+// ---------------- VARIABLES ----------------
+
+float zeroVoltage = 2.5;
+float currentValue = 0.0;
+float filteredCurrent = 0.0;
+
+float lastPrintedCurrent = -100.0;
+float lastPrintedTemp = -100.0;
+
+bool firstCurrentReading = true;
+bool firstTempReading = true;
+
+bool previousVibration = false;
+
+int currentStatus = -1;
+
+unsigned long lastCurrentRead = 0;
+unsigned long lastDHTRead = 0;
+unsigned long lastBeepTime = 0;
+unsigned long beepStartTime = 0;
+
+bool buzzerOn = false;
+
+// ---------------- CURRENT CALIBRATION ----------------
+
+void calibrateACS712() {
+
+  Serial.println("Calibrating ACS712...");
+  Serial.println("Keep motor OFF during calibration.");
+
+  long total = 0;
+
+  for (int i = 0; i < 500; i++) {
+    total += analogRead(ACS_PIN);
+    delay(2);
+  }
+
+  float averageADC = total / 500.0;
+
+  zeroVoltage = averageADC * (5.0 / 1023.0);
+
+  Serial.print("Current sensor zero voltage: ");
+  Serial.println(zeroVoltage, 3);
+
+  Serial.println("Calibration complete.");
+}
+
+// ---------------- CURRENT MEASUREMENT ----------------
+
+float readCurrent() {
+
+  long total = 0;
+
+  for (int i = 0; i < 40; i++) {
+    total += analogRead(ACS_PIN);
+    delay(2);
+  }
+
+  float averageADC = total / 40.0;
+
+  float voltage = averageADC * (5.0 / 1023.0);
+
+  float current = abs(voltage - zeroVoltage)
+                  / ACS_SENSITIVITY;
+
+  return current;
+}
+
+// ---------------- LED CONTROL ----------------
+
+void updateLEDs(int status) {
+
+  digitalWrite(GREEN_LED, LOW);
+  digitalWrite(ORANGE_LED, LOW);
+  digitalWrite(RED_LED, LOW);
+
+  if (status == 0) {
+    digitalWrite(GREEN_LED, HIGH);
+  }
+
+  else if (status == 1) {
+    digitalWrite(ORANGE_LED, HIGH);
+  }
+
+  else if (status == 2) {
+    digitalWrite(RED_LED, HIGH);
+  }
+}
+
+// ---------------- CURRENT STATUS ----------------
+
+void checkCurrentStatus() {
+
+  int newStatus;
+
+  if (filteredCurrent < WARNING_CURRENT) {
+    newStatus = 0;
+  }
+
+  else if (filteredCurrent < DANGER_CURRENT) {
+    newStatus = 1;
+  }
+
+  else {
+    newStatus = 2;
+  }
+
+  if (newStatus != currentStatus) {
+
+    currentStatus = newStatus;
+
+    updateLEDs(currentStatus);
+
+    if (currentStatus == 0) {
+      Serial.println("STATUS: SAFE");
+    }
+
+    else if (currentStatus == 1) {
+      Serial.println("WARNING: HIGH CURRENT DETECTED!");
+    }
+
+    else {
+      Serial.println("DANGER: CRITICAL CURRENT DETECTED!");
+    }
+  }
+}
+
+// ---------------- BUZZER CONTROL ----------------
+
+void updateBuzzer() {
+
+  unsigned long now = millis();
+
+  unsigned long interval;
+  unsigned long beepDuration;
+
+  if (currentStatus == 1) {
+    interval = 1000;
+    beepDuration = 150;
+  }
+
+  else if (currentStatus == 2) {
+    interval = 500;
+    beepDuration = 300;
+  }
+
+  else {
+    noTone(BUZZER_PIN);
+    buzzerOn = false;
+    return;
+  }
+
+  if (!buzzerOn && now - lastBeepTime >= interval) {
+
+    tone(BUZZER_PIN, 2000);
+
+    buzzerOn = true;
+    beepStartTime = now;
+    lastBeepTime = now;
+  }
+
+  if (buzzerOn && now - beepStartTime >= beepDuration) {
+
+    noTone(BUZZER_PIN);
+    buzzerOn = false;
+  }
+}
+
+// ---------------- SETUP ----------------
+
+void setup() {
+
+  Serial.begin(9600);
+
+  pinMode(VIBRATION_PIN, INPUT);
+
+  pinMode(GREEN_LED, OUTPUT);
+  pinMode(ORANGE_LED, OUTPUT);
+  pinMode(RED_LED, OUTPUT);
+
+  pinMode(BUZZER_PIN, OUTPUT);
+
+  dht.begin();
+
+  updateLEDs(0);
+
+  Serial.println();
+  Serial.println("INDUSTRIAL FAULT MONITORING SYSTEM");
+  Serial.println("----------------------------------");
+
+  calibrateACS712();
+
+  Serial.println("System monitoring started.");
+}
+
+// ---------------- MAIN LOOP ----------------
+
+void loop() {
+
+  unsigned long now = millis();
+
+  // -------- CURRENT MONITORING --------
+
+  if (now - lastCurrentRead >= 250) {
+
+    lastCurrentRead = now;
+
+    currentValue = readCurrent();
+
+    if (firstCurrentReading) {
+      filteredCurrent = currentValue;
+      firstCurrentReading = false;
+    }
+    else {
+      filteredCurrent =
+        (0.7 * filteredCurrent) +
+        (0.3 * currentValue);
+    }
+
+    // Print current only when it changes
+    if (firstCurrentReading == false &&
+        (lastPrintedCurrent < 0 ||
+         abs(filteredCurrent - lastPrintedCurrent)
+         >= CURRENT_CHANGE_LIMIT)) {
+
+      Serial.print("Current: ");
+      Serial.print(filteredCurrent, 2);
+      Serial.println(" A");
+
+      lastPrintedCurrent = filteredCurrent;
+    }
+
+    checkCurrentStatus();
+  }
+
+  // -------- TEMPERATURE MONITORING --------
+
+  if (now - lastDHTRead >= 2000) {
+
+    lastDHTRead = now;
+
+    float temperature = dht.readTemperature();
+
+    if (!isnan(temperature)) {
+
+      if (firstTempReading ||
+          abs(temperature - lastPrintedTemp)
+          >= TEMP_CHANGE_LIMIT) {
+
+        Serial.print("Temperature: ");
+        Serial.print(temperature, 1);
+        Serial.println(" C");
+
+        lastPrintedTemp = temperature;
+        firstTempReading = false;
+      }
+    }
+    else {
+      Serial.println("DHT22 sensor reading error.");
+    }
+  }
+
+  // -------- VIBRATION MONITORING --------
+
+  int vibrationReading = digitalRead(VIBRATION_PIN);
+
+  bool vibrationDetected;
+
+  if (VIBRATION_ACTIVE_LOW) {
+    vibrationDetected = (vibrationReading == LOW);
+  }
+  else {
+    vibrationDetected = (vibrationReading == HIGH);
+  }
+
+  if (vibrationDetected != previousVibration) {
+
+    previousVibration = vibrationDetected;
+
+    if (vibrationDetected) {
+      Serial.println("WARNING: VIBRATION DETECTED!");
+    }
+    else {
+      Serial.println("Vibration returned to normal.");
+    }
+  }
+
+  // -------- ALARM CONTROL --------
+
+  updateBuzzer();
+} 
